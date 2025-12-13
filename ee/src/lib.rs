@@ -1,12 +1,74 @@
 pub struct Cpu {
     gprs: [u128; 32],
     pc: u32,
-    hi: u128,
-    lo: u128,
+    hi0: u64,
+    hi1: u64,
+    lo0: u64,
+    lo1: u64,
     sa: u64,
+    next_pc: u32,
 }
 
 impl Cpu {
+    // Helper functions for instruction field extraction
+    #[inline]
+    const fn extract_rs(raw: u32) -> usize {
+        ((raw >> 21) & 0b11111) as usize
+    }
+
+    #[inline]
+    const fn extract_rt(raw: u32) -> usize {
+        ((raw >> 16) & 0b11111) as usize
+    }
+
+    #[inline]
+    const fn extract_rd(raw: u32) -> usize {
+        ((raw >> 11) & 0b11111) as usize
+    }
+
+    #[inline]
+    const fn extract_sa(raw: u32) -> u32 {
+        (raw >> 6) & 0b11111
+    }
+
+    // Read GPR as 32-bit word (lower 32 bits)
+    #[inline]
+    fn read_gpr_word(&self, index: usize) -> u32 {
+        self.gprs[index] as u32
+    }
+
+    // Write GPR as 32-bit word (sign-extended to 128 bits)
+    #[inline]
+    fn write_gpr_word(&mut self, index: usize, value: u32) {
+        self.gprs[index] &= 0xffff_ff00;
+        self.gprs[index] |= value as u128;
+    }
+
+    // Read GPR as 64-bit doubleword (lower 64 bits)
+    #[inline]
+    fn read_gpr_dword(&self, index: usize) -> u64 {
+        self.gprs[index] as u64
+    }
+
+    // Write GPR as 64-bit doubleword (sign-extended to 128 bits)
+    #[inline]
+    fn write_gpr_dword(&mut self, index: usize, value: u64) {
+        self.gprs[index] &= 0xffff_0000;
+        self.gprs[index] |= value as u128;
+    }
+
+    // Read GPR as 128-bit quadword (full width)
+    #[inline]
+    fn read_gpr_qword(&self, index: usize) -> u128 {
+        self.gprs[index]
+    }
+
+    // Write GPR as 128-bit quadword (full width)
+    #[inline]
+    fn write_gpr_qword(&mut self, index: usize, value: u128) {
+        self.gprs[index] = value;
+    }
+
     const OPCODE_SPECIAL: u32 = 0b000000;
 
     const SPECIAL_FUNCT_SLL: u32 = 0b000000; // 0x00
@@ -66,10 +128,19 @@ impl Cpu {
         Cpu {
             gprs: [0; 32],
             pc: 0,
-            hi: 0,
-            lo: 0,
+            next_pc: 4,
+            lo0: 0,
+            hi0: 0,
+            lo1: 0,
+            hi1: 0,
             sa: 0,
         }
+    }
+
+    #[inline]
+    pub fn update_pc(&mut self) {
+        self.pc = self.next_pc;
+        self.next_pc += 4;
     }
 
     pub fn exec(&mut self, raw: u32) {
@@ -140,117 +211,106 @@ impl Cpu {
     }
 
     fn do_sll(&mut self, raw: u32) {
-        // SLL rd, rt, sa
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        // SLL rd, rt, sa - Shift Left Logical
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        // Get lower 32 bits of rt and shift left by sa
-        let rt_value = self.gprs[rt] as u32;
-        let result = rt_value << sa;
-
-        // Sign-extend the 32-bit result to 128 bits
-        self.gprs[rd] = result as i32 as i64 as i128 as u128;
+        let result = (self.read_gpr_word(rt) as i32) << sa;
+        self.write_gpr_dword(rd, result as i64 as u64);
     }
 
     fn do_srl(&mut self, raw: u32) {
         // SRL rd, rt, sa - Shift Right Logical
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as u32;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i32 as i64 as i128 as u128;
+        let result = self.read_gpr_word(rt) >> sa;
+        self.write_gpr_dword(rd, result as i32 as i64 as u64);
     }
 
     fn do_sra(&mut self, raw: u32) {
         // SRA rd, rt, sa - Shift Right Arithmetic
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as i32;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = (self.read_gpr_word(rt) as i32) >> sa;
+        self.write_gpr_dword(rd, result as i64 as u64);
     }
 
     fn do_sllv(&mut self, raw: u32) {
         // SLLV rd, rt, rs - Shift Left Logical Variable
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rt_value = self.gprs[rt] as u32;
-        let sa = (self.gprs[rs] & 0b11111) as u32;
-        let result = rt_value << sa;
-
-        self.gprs[rd] = result as i32 as i64 as i128 as u128;
+        let sa = self.read_gpr_word(rs) & 0b11111;
+        let result = (self.read_gpr_word(rt) as i32) << sa;
+        self.write_gpr_dword(rd, result as i64 as u64);
     }
 
     fn do_srlv(&mut self, raw: u32) {
         // SRLV rd, rt, rs - Shift Right Logical Variable
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rt_value = self.gprs[rt] as u32;
-        let sa = (self.gprs[rs] & 0b11111) as u32;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i32 as i64 as i128 as u128;
+        let sa = self.read_gpr_word(rs) & 0b11111;
+        let result = (self.read_gpr_word(rt) as u32) >> sa;
+        self.write_gpr_dword(rd, result as i32 as i64 as u64);
     }
 
     fn do_srav(&mut self, raw: u32) {
         // SRAV rd, rt, rs - Shift Right Arithmetic Variable
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rt_value = self.gprs[rt] as i32;
-        let sa = (self.gprs[rs] & 0b11111) as u32;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let sa = self.read_gpr_word(rs) & 0b11111;
+        let result = (self.read_gpr_word(rt) as i32) >> sa;
+        self.write_gpr_dword(rd, result as i64 as u64);
     }
 
     fn do_jr(&mut self, raw: u32) {
         // JR rs - Jump Register
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        self.pc = self.gprs[rs] as u32;
+        let rs = Self::extract_rs(raw);
+        // TODO: check rs alignment (should be checked during the regular fetch though)
+        // NOTE: technically this should 'read_gpr_dword', but on the PS2 EE the bit width of PC is 32, so...
+        self.next_pc = self.read_gpr_word(rs);
     }
 
     fn do_jalr(&mut self, raw: u32) {
         // JALR rd, rs - Jump And Link Register
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rd = Self::extract_rd(raw);
+        // TODO: check rs alignment (should be checked during the regular fetch though)
+        // TODO: make sure rs != rd
 
-        let target = self.gprs[rs] as u32;
-        self.gprs[rd] = (self.pc + 8) as u128; // Save return address
-        self.pc = target;
+        self.write_gpr_dword(rd, (self.pc + 8) as u64);
+        self.next_pc = self.read_gpr_word(rs);
     }
 
     fn do_movz(&mut self, raw: u32) {
         // MOVZ rd, rs, rt - Move Conditional on Zero
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        if self.gprs[rt] == 0 {
-            self.gprs[rd] = self.gprs[rs];
+        if self.read_gpr_dword(rt) == 0 {
+            self.write_gpr_dword(rd, self.read_gpr_dword(rs));
         }
     }
 
     fn do_movn(&mut self, raw: u32) {
         // MOVN rd, rs, rt - Move Conditional on Not Zero
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        if self.gprs[rt] != 0 {
-            self.gprs[rd] = self.gprs[rs];
+        if self.read_gpr_dword(rt) != 0 {
+            self.write_gpr_dword(rd, self.read_gpr_dword(rs));
         }
     }
 
@@ -266,6 +326,7 @@ impl Cpu {
         panic!("BREAK instruction executed");
     }
 
+    // SKIPPED THIS
     fn do_sync(&mut self, _raw: u32) {
         // SYNC - Synchronize Shared Memory
         // On EE, this is essentially a NOP for ordering memory operations
@@ -273,1318 +334,420 @@ impl Cpu {
 
     fn do_mfhi(&mut self, raw: u32) {
         // MFHI rd - Move From HI
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        self.gprs[rd] = self.hi;
+        let rd = Self::extract_rd(raw);
+        // TODO: need to make sure that the 2 preceding instructions don't modify HI0
+        self.write_gpr_dword(rd, self.hi0);
     }
 
     fn do_mthi(&mut self, raw: u32) {
         // MTHI rs - Move To HI
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        self.hi = self.gprs[rs];
+        let rs = Self::extract_rs(raw);
+        // TODO: need to make sure that the 2 following instructions don't modify HI0
+        self.hi0 = self.read_gpr_dword(rs);
     }
 
     fn do_mflo(&mut self, raw: u32) {
         // MFLO rd - Move From LO
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        self.gprs[rd] = self.lo;
+        let rd = Self::extract_rd(raw);
+        // TODO: need to make sure that the 2 preceding instructions don't modify HI0
+        self.write_gpr_dword(rd, self.lo0);
     }
 
     fn do_mtlo(&mut self, raw: u32) {
         // MTLO rs - Move To LO
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        self.lo = self.gprs[rs];
+        let rs = Self::extract_rs(raw);
+        // TODO: need to make sure that the 2 following instructions don't modify HI0
+        self.lo0 = self.read_gpr_dword(rs);
     }
 
     fn do_dsllv(&mut self, raw: u32) {
         // DSLLV rd, rt, rs - Doubleword Shift Left Logical Variable
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rt_value = self.gprs[rt] as u64;
-        let sa = (self.gprs[rs] & 0b111111) as u32;
-        let result = rt_value << sa;
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let sa = self.read_gpr_word(rs) & 0b111111;
+        let result = self.read_gpr_dword(rt) << sa;
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsrlv(&mut self, raw: u32) {
         // DSRLV rd, rt, rs - Doubleword Shift Right Logical Variable
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rt_value = self.gprs[rt] as u64;
-        let sa = (self.gprs[rs] & 0b111111) as u32;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let sa = self.read_gpr_word(rs) & 0b111111;
+        let result = self.read_gpr_dword(rt) >> sa;
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsrav(&mut self, raw: u32) {
         // DSRAV rd, rt, rs - Doubleword Shift Right Arithmetic Variable
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rt_value = self.gprs[rt] as i64;
-        let sa = (self.gprs[rs] & 0b111111) as u32;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i128 as u128;
+        let sa = self.read_gpr_qword(rs) & 0b111111;
+        let result = (self.read_gpr_dword(rt) as i64) >> sa;
+        self.write_gpr_dword(rd, result as u64);
     }
 
     fn do_mult(&mut self, raw: u32) {
-        // MULT rs, rt - Multiply Word
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as i32;
-        let rt_value = self.gprs[rt] as i32;
-        let result = (rs_value as i64) * (rt_value as i64);
+        let a = self.read_gpr_word(rs) as i32 as i64;
+        let b = self.read_gpr_word(rt) as i32 as i64;
+        let result = a * b;
 
-        self.lo = (result as i32) as i64 as i128 as u128;
-        self.hi = ((result >> 32) as i32) as i64 as i128 as u128;
+        self.lo0 = result as u32 as u64;
+        self.hi0 = (result >> 32) as u32 as u64;
     }
 
     fn do_multu(&mut self, raw: u32) {
-        // MULTU rs, rt - Multiply Unsigned Word
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as u32;
-        let rt_value = self.gprs[rt] as u32;
-        let result = (rs_value as u64) * (rt_value as u64);
+        let a = self.read_gpr_word(rs) as u64;
+        let b = self.read_gpr_word(rt) as u64;
+        let result = a * b;
 
-        self.lo = (result as u32) as i32 as i64 as i128 as u128;
-        self.hi = ((result >> 32) as u32) as i32 as i64 as i128 as u128;
+        self.lo0 = result as u32 as u64;
+        self.hi0 = result >> 32;
     }
 
     fn do_div(&mut self, raw: u32) {
         // DIV rs, rt - Divide Word
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as i32;
-        let rt_value = self.gprs[rt] as i32;
+        let rs_value = self.read_gpr_word(rs) as i32 as i64;
+        let rt_value = self.read_gpr_word(rt) as i32 as i64;
 
         if rt_value == 0 {
-            // Division by zero - result is undefined, typically no exception on MIPS
-            self.lo = if rs_value >= 0 { u128::MAX } else { 1 };
-            self.hi = rs_value as i64 as i128 as u128;
+            // in this case, lo0 and hi0 should be in an "undefined state". I think a NOP will do the job
+            return;
         } else {
-            let quotient = rs_value.wrapping_div(rt_value);
-            let remainder = rs_value.wrapping_rem(rt_value);
-            self.lo = quotient as i64 as i128 as u128;
-            self.hi = remainder as i64 as i128 as u128;
+            self.lo0 = rs_value.wrapping_div(rt_value) as u64;
+            self.hi0 = rs_value.wrapping_rem(rt_value) as u64;
         }
     }
 
     fn do_divu(&mut self, raw: u32) {
         // DIVU rs, rt - Divide Unsigned Word
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as u32;
-        let rt_value = self.gprs[rt] as u32;
+        let rs_value = self.read_gpr_word(rs) as u64;
+        let rt_value = self.read_gpr_word(rt) as u64;
 
         if rt_value == 0 {
-            self.lo = u128::MAX;
-            self.hi = rs_value as i32 as i64 as i128 as u128;
+            // in this case, lo0 and hi0 should be in an "undefined state". I think a NOP will do the job
+            return;
         } else {
-            let quotient = rs_value / rt_value;
-            let remainder = rs_value % rt_value;
-            self.lo = quotient as i32 as i64 as i128 as u128;
-            self.hi = remainder as i32 as i64 as i128 as u128;
+            self.lo0 = rs_value / rt_value;
+            self.hi0 = rs_value % rt_value;
         }
     }
 
     fn do_add(&mut self, raw: u32) {
         // ADD rd, rs, rt - Add with Overflow
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as i32;
-        let rt_value = self.gprs[rt] as i32;
+        let rs_value = self.read_gpr_word(rs) as i32;
+        let rt_value = self.read_gpr_word(rt) as i32;
 
         match rs_value.checked_add(rt_value) {
-            Some(result) => self.gprs[rd] = result as i64 as i128 as u128,
+            Some(result) => self.write_gpr_dword(rd, result as i64 as u64),
             None => panic!("ADD overflow exception"),
         }
     }
 
     fn do_addu(&mut self, raw: u32) {
         // ADDU rd, rs, rt - Add Unsigned (no overflow)
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as u32;
-        let rt_value = self.gprs[rt] as u32;
-        let result = rs_value.wrapping_add(rt_value);
-
-        self.gprs[rd] = result as i32 as i64 as i128 as u128;
+        let result = self.read_gpr_word(rs).wrapping_add(self.read_gpr_word(rt));
+        self.write_gpr_dword(rd, result as u64);
     }
 
     fn do_sub(&mut self, raw: u32) {
         // SUB rd, rs, rt - Subtract with Overflow
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as i32;
-        let rt_value = self.gprs[rt] as i32;
+        let rs_value = self.read_gpr_word(rs) as i32;
+        let rt_value = self.read_gpr_word(rt) as i32;
 
         match rs_value.checked_sub(rt_value) {
-            Some(result) => self.gprs[rd] = result as i64 as i128 as u128,
+            Some(result) => self.write_gpr_dword(rd, result as i64 as u64),
             None => panic!("SUB overflow exception"),
         }
     }
 
     fn do_subu(&mut self, raw: u32) {
         // SUBU rd, rs, rt - Subtract Unsigned (no overflow)
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as u32;
-        let rt_value = self.gprs[rt] as u32;
-        let result = rs_value.wrapping_sub(rt_value);
-
-        self.gprs[rd] = result as i32 as i64 as i128 as u128;
+        let result = self.read_gpr_word(rs).wrapping_sub(self.read_gpr_word(rt));
+        self.write_gpr_dword(rd, result as u64);
     }
 
     fn do_and(&mut self, raw: u32) {
         // AND rd, rs, rt - Bitwise AND
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        self.gprs[rd] = self.gprs[rs] & self.gprs[rt];
+        self.write_gpr_dword(rd, self.read_gpr_dword(rs) & self.read_gpr_dword(rt));
     }
 
     fn do_or(&mut self, raw: u32) {
         // OR rd, rs, rt - Bitwise OR
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        self.gprs[rd] = self.gprs[rs] | self.gprs[rt];
+        self.write_gpr_dword(rd, self.read_gpr_dword(rs) | self.read_gpr_dword(rt));
     }
 
     fn do_xor(&mut self, raw: u32) {
         // XOR rd, rs, rt - Bitwise XOR
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        self.gprs[rd] = self.gprs[rs] ^ self.gprs[rt];
+        self.write_gpr_dword(rd, self.read_gpr_dword(rs) ^ self.read_gpr_dword(rt));
     }
 
     fn do_nor(&mut self, raw: u32) {
         // NOR rd, rs, rt - Bitwise NOR
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        self.gprs[rd] = !(self.gprs[rs] | self.gprs[rt]);
+        self.write_gpr_dword(rd, !(self.read_gpr_dword(rs) | self.read_gpr_dword(rt)));
     }
 
     fn do_mfsa(&mut self, raw: u32) {
         // MFSA rd - Move From Shift Amount
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        self.gprs[rd] = self.sa as u128;
+        let rd = Self::extract_rd(raw);
+        self.write_gpr_dword(rd, self.sa as u64);
     }
 
     fn do_mtsa(&mut self, raw: u32) {
         // MTSA rs - Move To Shift Amount
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        self.sa = self.gprs[rs] as u64;
+        let rs = Self::extract_rs(raw);
+        self.sa = self.read_gpr_dword(rs);
     }
 
     fn do_slt(&mut self, raw: u32) {
         // SLT rd, rs, rt - Set on Less Than
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as i64;
-        let rt_value = self.gprs[rt] as i64;
-        self.gprs[rd] = if rs_value < rt_value { 1 } else { 0 };
+        let result = if (self.read_gpr_dword(rs) as i64) < (self.read_gpr_dword(rt) as i64) {
+            1
+        } else {
+            0
+        };
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_sltu(&mut self, raw: u32) {
         // SLTU rd, rs, rt - Set on Less Than Unsigned
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as u64;
-        let rt_value = self.gprs[rt] as u64;
-        self.gprs[rd] = if rs_value < rt_value { 1 } else { 0 };
+        let result = if self.read_gpr_dword(rs) < self.read_gpr_dword(rt) {
+            1
+        } else {
+            0
+        };
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dadd(&mut self, raw: u32) {
         // DADD rd, rs, rt - Doubleword Add with Overflow
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as i64;
-        let rt_value = self.gprs[rt] as i64;
+        let rs_value = self.read_gpr_dword(rs) as i64;
+        let rt_value = self.read_gpr_dword(rt) as i64;
 
         match rs_value.checked_add(rt_value) {
-            Some(result) => self.gprs[rd] = result as i128 as u128,
+            Some(result) => self.write_gpr_dword(rd, result as u64),
             None => panic!("DADD overflow exception"),
         }
     }
 
     fn do_daddu(&mut self, raw: u32) {
         // DADDU rd, rs, rt - Doubleword Add Unsigned (no overflow)
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as u64;
-        let rt_value = self.gprs[rt] as u64;
-        let result = rs_value.wrapping_add(rt_value);
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = self
+            .read_gpr_dword(rs)
+            .wrapping_add(self.read_gpr_dword(rt));
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsub(&mut self, raw: u32) {
         // DSUB rd, rs, rt - Doubleword Subtract with Overflow
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as i64;
-        let rt_value = self.gprs[rt] as i64;
+        let rs_value = self.read_gpr_dword(rs) as i64;
+        let rt_value = self.read_gpr_dword(rt) as i64;
 
         match rs_value.checked_sub(rt_value) {
-            Some(result) => self.gprs[rd] = result as i128 as u128,
+            Some(result) => self.write_gpr_dword(rd, result as u64),
             None => panic!("DSUB overflow exception"),
         }
     }
 
     fn do_dsubu(&mut self, raw: u32) {
         // DSUBU rd, rs, rt - Doubleword Subtract Unsigned (no overflow)
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
 
-        let rs_value = self.gprs[rs] as u64;
-        let rt_value = self.gprs[rt] as u64;
-        let result = rs_value.wrapping_sub(rt_value);
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = self
+            .read_gpr_dword(rs)
+            .wrapping_sub(self.read_gpr_dword(rt));
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_tge(&mut self, raw: u32) {
         // TGE rs, rt - Trap if Greater or Equal
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as i64;
-        let rt_value = self.gprs[rt] as i64;
-
-        if rs_value >= rt_value {
+        if (self.read_gpr_dword(rs) as i64) >= (self.read_gpr_dword(rt) as i64) {
             panic!("TGE trap exception");
         }
     }
 
     fn do_tgeu(&mut self, raw: u32) {
         // TGEU rs, rt - Trap if Greater or Equal Unsigned
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as u64;
-        let rt_value = self.gprs[rt] as u64;
-
-        if rs_value >= rt_value {
+        if self.read_gpr_dword(rs) >= self.read_gpr_dword(rt) {
             panic!("TGEU trap exception");
         }
     }
 
     fn do_tlt(&mut self, raw: u32) {
         // TLT rs, rt - Trap if Less Than
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as i64;
-        let rt_value = self.gprs[rt] as i64;
-
-        if rs_value < rt_value {
+        if (self.read_gpr_dword(rs) as i64) < (self.read_gpr_dword(rt) as i64) {
             panic!("TLT trap exception");
         }
     }
 
     fn do_tltu(&mut self, raw: u32) {
         // TLTU rs, rt - Trap if Less Than Unsigned
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        let rs_value = self.gprs[rs] as u64;
-        let rt_value = self.gprs[rt] as u64;
-
-        if rs_value < rt_value {
+        if self.read_gpr_dword(rs) < self.read_gpr_dword(rt) {
             panic!("TLTU trap exception");
         }
     }
 
     fn do_teq(&mut self, raw: u32) {
         // TEQ rs, rt - Trap if Equal
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        if self.gprs[rs] == self.gprs[rt] {
+        if self.read_gpr_qword(rs) == self.read_gpr_qword(rt) {
             panic!("TEQ trap exception");
         }
     }
 
     fn do_tne(&mut self, raw: u32) {
         // TNE rs, rt - Trap if Not Equal
-        let rs = ((raw >> 21) & 0b11111) as usize;
-        let rt = ((raw >> 16) & 0b11111) as usize;
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
 
-        if self.gprs[rs] != self.gprs[rt] {
+        if self.read_gpr_qword(rs) != self.read_gpr_qword(rt) {
             panic!("TNE trap exception");
         }
     }
 
     fn do_dsll(&mut self, raw: u32) {
         // DSLL rd, rt, sa - Doubleword Shift Left Logical
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as u64;
-        let result = rt_value << sa;
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = self.read_gpr_dword(rt) << (sa & 0b11111);
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsrl(&mut self, raw: u32) {
         // DSRL rd, rt, sa - Doubleword Shift Right Logical
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as u64;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = self.read_gpr_dword(rt) >> (sa & 0b11111);
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsra(&mut self, raw: u32) {
         // DSRA rd, rt, sa - Doubleword Shift Right Arithmetic
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as i64;
-        let result = rt_value >> sa;
-
-        self.gprs[rd] = result as i128 as u128;
+        let result = (self.read_gpr_dword(rt) as i64) >> (sa & 0b11111);
+        self.write_gpr_dword(rd, result as u64);
     }
 
     fn do_dsll32(&mut self, raw: u32) {
         // DSLL32 rd, rt, sa - Doubleword Shift Left Logical + 32
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as u64;
-        let result = rt_value << (sa + 32);
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = self.read_gpr_dword(rt) << ((sa & 0b11111) + 32);
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsrl32(&mut self, raw: u32) {
         // DSRL32 rd, rt, sa - Doubleword Shift Right Logical + 32
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
 
-        let rt_value = self.gprs[rt] as u64;
-        let result = rt_value >> (sa + 32);
-
-        self.gprs[rd] = result as i64 as i128 as u128;
+        let result = self.read_gpr_dword(rt) >> ((sa & 0b11111) + 32);
+        self.write_gpr_dword(rd, result);
     }
 
     fn do_dsra32(&mut self, raw: u32) {
         // DSRA32 rd, rt, sa - Doubleword Shift Right Arithmetic + 32
-        let rt = ((raw >> 16) & 0b11111) as usize;
-        let rd = ((raw >> 11) & 0b11111) as usize;
-        let sa = ((raw >> 6) & 0b11111) as u32;
-
-        let rt_value = self.gprs[rt] as i64;
-        let result = rt_value >> (sa + 32);
-
-        self.gprs[rd] = result as i128 as u128;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Helper function to create R-type instruction
-    fn make_r_type(rs: u32, rt: u32, rd: u32, sa: u32, funct: u32) -> u32 {
-        (rs << 21) | (rt << 16) | (rd << 11) | (sa << 6) | funct
-    }
-
-    // Helper function to create instruction with just funct
-    fn make_special(funct: u32) -> u32 {
-        funct
-    }
-
-    #[test]
-    fn test_sll() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-
-        // SLL $2, $1, 4
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_SLL);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i32, 0x23456780_u32 as i32);
-    }
-
-    #[test]
-    fn test_srl() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x80000000;
-
-        // SRL $2, $1, 4
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_SRL);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as u32, 0x08000000);
-    }
-
-    #[test]
-    fn test_sra() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x80000000_u32 as i32 as i64 as i128 as u128;
-
-        // SRA $2, $1, 4
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_SRA);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i32, 0xF8000000_u32 as i32);
-    }
-
-    #[test]
-    fn test_sllv() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-        cpu.gprs[3] = 8;
-
-        // SLLV $2, $1, $3
-        let instr = make_r_type(3, 1, 2, 0, Cpu::SPECIAL_FUNCT_SLLV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i32, 0x34567800_u32 as i32);
-    }
-
-    #[test]
-    fn test_srlv() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x80000000;
-        cpu.gprs[3] = 4;
-
-        // SRLV $2, $1, $3
-        let instr = make_r_type(3, 1, 2, 0, Cpu::SPECIAL_FUNCT_SRLV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as u32, 0x08000000);
-    }
-
-    #[test]
-    fn test_srav() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x80000000_u32 as i32 as i64 as i128 as u128;
-        cpu.gprs[3] = 4;
-
-        // SRAV $2, $1, $3
-        let instr = make_r_type(3, 1, 2, 0, Cpu::SPECIAL_FUNCT_SRAV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i32, 0xF8000000_u32 as i32);
-    }
-
-    #[test]
-    fn test_jr() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[31] = 0x1000;
-        cpu.pc = 0x2000;
-
-        // JR $31
-        let instr = make_r_type(31, 0, 0, 0, Cpu::SPECIAL_FUNCT_JR);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.pc, 0x1000);
-    }
-
-    #[test]
-    fn test_jalr() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x5000;
-        cpu.pc = 0x2000;
-
-        // JALR $31, $1
-        let instr = make_r_type(1, 0, 31, 0, Cpu::SPECIAL_FUNCT_JALR);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.pc, 0x5000);
-        assert_eq!(cpu.gprs[31], 0x2008);
-    }
-
-    #[test]
-    fn test_movz() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-        cpu.gprs[2] = 0; // condition is zero
-        cpu.gprs[3] = 0xDEADBEEF;
-
-        // MOVZ $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_MOVZ);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0x12345678);
-    }
-
-    #[test]
-    fn test_movz_no_move() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-        cpu.gprs[2] = 1; // condition is not zero
-        cpu.gprs[3] = 0xDEADBEEF;
-
-        // MOVZ $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_MOVZ);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0xDEADBEEF);
-    }
-
-    #[test]
-    fn test_movn() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-        cpu.gprs[2] = 1; // condition is not zero
-        cpu.gprs[3] = 0xDEADBEEF;
-
-        // MOVN $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_MOVN);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0x12345678);
-    }
-
-    #[test]
-    fn test_movn_no_move() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-        cpu.gprs[2] = 0; // condition is zero
-        cpu.gprs[3] = 0xDEADBEEF;
-
-        // MOVN $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_MOVN);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0xDEADBEEF);
-    }
-
-    #[test]
-    fn test_sync() {
-        let mut cpu = Cpu::new();
-
-        // SYNC (should do nothing)
-        let instr = make_special(Cpu::SPECIAL_FUNCT_SYNC);
-        cpu.exec(instr);
-
-        // Just verify it doesn't crash
-        assert_eq!(cpu.pc, 0);
-    }
-
-    #[test]
-    fn test_mfhi() {
-        let mut cpu = Cpu::new();
-        cpu.hi = 0x12345678ABCDEF00;
-
-        // MFHI $1
-        let instr = make_r_type(0, 0, 1, 0, Cpu::SPECIAL_FUNCT_MFHI);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[1], 0x12345678ABCDEF00);
-    }
-
-    #[test]
-    fn test_mthi() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xFEEDFACECAFEBABE;
-
-        // MTHI $1
-        let instr = make_r_type(1, 0, 0, 0, Cpu::SPECIAL_FUNCT_MTHI);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.hi, 0xFEEDFACECAFEBABE);
-    }
-
-    #[test]
-    fn test_mflo() {
-        let mut cpu = Cpu::new();
-        cpu.lo = 0x12345678ABCDEF00;
-
-        // MFLO $1
-        let instr = make_r_type(0, 0, 1, 0, Cpu::SPECIAL_FUNCT_MFLO);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[1], 0x12345678ABCDEF00);
-    }
-
-    #[test]
-    fn test_mtlo() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xFEEDFACECAFEBABE;
-
-        // MTLO $1
-        let instr = make_r_type(1, 0, 0, 0, Cpu::SPECIAL_FUNCT_MTLO);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo, 0xFEEDFACECAFEBABE);
-    }
-
-    #[test]
-    fn test_dsllv() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x123456789ABCDEF0;
-        cpu.gprs[3] = 8;
-
-        // DSLLV $2, $1, $3
-        let instr = make_r_type(3, 1, 2, 0, Cpu::SPECIAL_FUNCT_DSLLV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0x3456789ABCDEF000_u64 as i64);
-    }
-
-    #[test]
-    fn test_dsrlv() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x8000000000000000_u64 as i64 as i128 as u128;
-        cpu.gprs[3] = 4;
-
-        // DSRLV $2, $1, $3
-        let instr = make_r_type(3, 1, 2, 0, Cpu::SPECIAL_FUNCT_DSRLV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as u64, 0x0800000000000000);
-    }
-
-    #[test]
-    fn test_dsrav() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x8000000000000000_u64 as i64 as i128 as u128;
-        cpu.gprs[3] = 4;
-
-        // DSRAV $2, $1, $3
-        let instr = make_r_type(3, 1, 2, 0, Cpu::SPECIAL_FUNCT_DSRAV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0xF800000000000000_u64 as i64);
-    }
-
-    #[test]
-    fn test_mult() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x00001000_u32 as i32 as i64 as i128 as u128;
-        cpu.gprs[2] = 0x00002000_u32 as i32 as i64 as i128 as u128;
-
-        // MULT $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_MULT);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo as i32, 0x02000000);
-        assert_eq!(cpu.hi as i32, 0);
-    }
-
-    #[test]
-    fn test_mult_negative() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = (-10_i32) as i64 as i128 as u128;
-        cpu.gprs[2] = (20_i32) as i64 as i128 as u128;
-
-        // MULT $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_MULT);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo as i32, -200);
-        assert_eq!(cpu.hi as i32, -1);
-    }
-
-    #[test]
-    fn test_multu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xFFFFFFFF;
-        cpu.gprs[2] = 0x00000002;
-
-        // MULTU $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_MULTU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo as u32, 0xFFFFFFFE);
-        assert_eq!(cpu.hi as u32, 0x00000001);
-    }
-
-    #[test]
-    fn test_div() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 100_i32 as i64 as i128 as u128;
-        cpu.gprs[2] = 7_i32 as i64 as i128 as u128;
-
-        // DIV $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_DIV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo as i32, 14); // quotient
-        assert_eq!(cpu.hi as i32, 2); // remainder
-    }
-
-    #[test]
-    fn test_div_negative() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = (-100_i32) as i64 as i128 as u128;
-        cpu.gprs[2] = 7_i32 as i64 as i128 as u128;
-
-        // DIV $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_DIV);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo as i32, -14); // quotient
-        assert_eq!(cpu.hi as i32, -2); // remainder
-    }
-
-    #[test]
-    fn test_divu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 100;
-        cpu.gprs[2] = 7;
-
-        // DIVU $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_DIVU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.lo as u32, 14); // quotient
-        assert_eq!(cpu.hi as u32, 2); // remainder
-    }
-
-    #[test]
-    fn test_add() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 100_i32 as i64 as i128 as u128;
-        cpu.gprs[2] = 200_i32 as i64 as i128 as u128;
-
-        // ADD $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_ADD);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i32, 300);
-    }
-
-    #[test]
-    #[should_panic(expected = "ADD overflow exception")]
-    fn test_add_overflow() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = i32::MAX as i64 as i128 as u128;
-        cpu.gprs[2] = 1_i32 as i64 as i128 as u128;
-
-        // ADD $3, $1, $2 - should overflow
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_ADD);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_addu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 100;
-        cpu.gprs[2] = 200;
-
-        // ADDU $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_ADDU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i32, 300);
-    }
-
-    #[test]
-    fn test_addu_no_overflow() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = i32::MAX as u32 as u128;
-        cpu.gprs[2] = 1;
-
-        // ADDU $3, $1, $2 - wraps without exception
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_ADDU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i32, i32::MIN);
-    }
-
-    #[test]
-    fn test_sub() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 300_i32 as i64 as i128 as u128;
-        cpu.gprs[2] = 100_i32 as i64 as i128 as u128;
-
-        // SUB $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SUB);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i32, 200);
-    }
-
-    #[test]
-    #[should_panic(expected = "SUB overflow exception")]
-    fn test_sub_overflow() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = i32::MIN as i64 as i128 as u128;
-        cpu.gprs[2] = 1_i32 as i64 as i128 as u128;
-
-        // SUB $3, $1, $2 - should overflow
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SUB);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_subu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 300;
-        cpu.gprs[2] = 100;
-
-        // SUBU $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SUBU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i32, 200);
-    }
-
-    #[test]
-    fn test_and() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xF0F0F0F0;
-        cpu.gprs[2] = 0xFF00FF00;
-
-        // AND $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_AND);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0xF000F000);
-    }
-
-    #[test]
-    fn test_or() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xF0F0F0F0;
-        cpu.gprs[2] = 0x0F0F0F0F;
-
-        // OR $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_OR);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0xFFFFFFFF);
-    }
-
-    #[test]
-    fn test_xor() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xF0F0F0F0;
-        cpu.gprs[2] = 0xFF00FF00;
-
-        // XOR $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_XOR);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0x0FF00FF0);
-    }
-
-    #[test]
-    fn test_nor() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xF0F0F0F0;
-        cpu.gprs[2] = 0x0F0F0F0F;
-
-        // NOR $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_NOR);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], !0xFFFFFFFF_u128);
-    }
-
-    #[test]
-    fn test_mfsa() {
-        let mut cpu = Cpu::new();
-        cpu.sa = 0x12345678ABCDEF00;
-
-        // MFSA $1
-        let instr = make_r_type(0, 0, 1, 0, Cpu::SPECIAL_FUNCT_MFSA);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[1], 0x12345678ABCDEF00);
-    }
-
-    #[test]
-    fn test_mtsa() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0xFEEDFACECAFEBABE;
-
-        // MTSA $1
-        let instr = make_r_type(1, 0, 0, 0, Cpu::SPECIAL_FUNCT_MTSA);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.sa, 0xFEEDFACECAFEBABE);
-    }
-
-    #[test]
-    fn test_slt() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = (-10_i64) as i128 as u128;
-        cpu.gprs[2] = 20_i64 as i128 as u128;
-
-        // SLT $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SLT);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 1);
-    }
-
-    #[test]
-    fn test_slt_false() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 20_i64 as i128 as u128;
-        cpu.gprs[2] = (-10_i64) as i128 as u128;
-
-        // SLT $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SLT);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0);
-    }
-
-    #[test]
-    fn test_sltu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 10;
-        cpu.gprs[2] = 20;
-
-        // SLTU $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SLTU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 1);
-    }
-
-    #[test]
-    fn test_sltu_false() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 20;
-        cpu.gprs[2] = 10;
-
-        // SLTU $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_SLTU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3], 0);
-    }
-
-    #[test]
-    fn test_dadd() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 100_i64 as i128 as u128;
-        cpu.gprs[2] = 200_i64 as i128 as u128;
-
-        // DADD $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_DADD);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i64, 300);
-    }
-
-    #[test]
-    #[should_panic(expected = "DADD overflow exception")]
-    fn test_dadd_overflow() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = i64::MAX as i128 as u128;
-        cpu.gprs[2] = 1_i64 as i128 as u128;
-
-        // DADD $3, $1, $2 - should overflow
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_DADD);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_daddu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 100;
-        cpu.gprs[2] = 200;
-
-        // DADDU $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_DADDU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i64, 300);
-    }
-
-    #[test]
-    fn test_dsub() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 300_i64 as i128 as u128;
-        cpu.gprs[2] = 100_i64 as i128 as u128;
-
-        // DSUB $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_DSUB);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i64, 200);
-    }
-
-    #[test]
-    #[should_panic(expected = "DSUB overflow exception")]
-    fn test_dsub_overflow() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = i64::MIN as i128 as u128;
-        cpu.gprs[2] = 1_i64 as i128 as u128;
-
-        // DSUB $3, $1, $2 - should overflow
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_DSUB);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_dsubu() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 300;
-        cpu.gprs[2] = 100;
-
-        // DSUBU $3, $1, $2
-        let instr = make_r_type(1, 2, 3, 0, Cpu::SPECIAL_FUNCT_DSUBU);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[3] as i64, 200);
-    }
-
-    #[test]
-    #[should_panic(expected = "TGE trap exception")]
-    fn test_tge_triggers() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 20_i64 as i128 as u128;
-        cpu.gprs[2] = 10_i64 as i128 as u128;
-
-        // TGE $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TGE);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_tge_no_trap() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 5_i64 as i128 as u128;
-        cpu.gprs[2] = 10_i64 as i128 as u128;
-
-        // TGE $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TGE);
-        cpu.exec(instr);
-
-        // Should not panic
-        assert_eq!(cpu.gprs[1] as i64, 5);
-    }
-
-    #[test]
-    #[should_panic(expected = "TGEU trap exception")]
-    fn test_tgeu_triggers() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 20;
-        cpu.gprs[2] = 10;
-
-        // TGEU $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TGEU);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    #[should_panic(expected = "TLT trap exception")]
-    fn test_tlt_triggers() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 5_i64 as i128 as u128;
-        cpu.gprs[2] = 10_i64 as i128 as u128;
-
-        // TLT $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TLT);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    #[should_panic(expected = "TLTU trap exception")]
-    fn test_tltu_triggers() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 5;
-        cpu.gprs[2] = 10;
-
-        // TLTU $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TLTU);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    #[should_panic(expected = "TEQ trap exception")]
-    fn test_teq_triggers() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 10;
-        cpu.gprs[2] = 10;
-
-        // TEQ $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TEQ);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_teq_no_trap() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 10;
-        cpu.gprs[2] = 20;
-
-        // TEQ $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TEQ);
-        cpu.exec(instr);
-
-        // Should not panic
-        assert_eq!(cpu.gprs[1], 10);
-    }
-
-    #[test]
-    #[should_panic(expected = "TNE trap exception")]
-    fn test_tne_triggers() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 10;
-        cpu.gprs[2] = 20;
-
-        // TNE $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TNE);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    fn test_tne_no_trap() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 10;
-        cpu.gprs[2] = 10;
-
-        // TNE $1, $2
-        let instr = make_r_type(1, 2, 0, 0, Cpu::SPECIAL_FUNCT_TNE);
-        cpu.exec(instr);
-
-        // Should not panic
-        assert_eq!(cpu.gprs[1], 10);
-    }
-
-    #[test]
-    fn test_dsll() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x123456789ABCDEF0;
-
-        // DSLL $2, $1, 4
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_DSLL);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0x23456789ABCDEF00_u64 as i64);
-    }
-
-    #[test]
-    fn test_dsrl() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x8000000000000000_u64 as i64 as i128 as u128;
-
-        // DSRL $2, $1, 4
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_DSRL);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as u64, 0x0800000000000000);
-    }
-
-    #[test]
-    fn test_dsra() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x8000000000000000_u64 as i64 as i128 as u128;
-
-        // DSRA $2, $1, 4
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_DSRA);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0xF800000000000000_u64 as i64);
-    }
-
-    #[test]
-    fn test_dsll32() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-
-        // DSLL32 $2, $1, 0 (shifts by 32)
-        let instr = make_r_type(0, 1, 2, 0, Cpu::SPECIAL_FUNCT_DSLL32);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0x1234567800000000_u64 as i64);
-    }
-
-    #[test]
-    fn test_dsll32_with_sa() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x12345678;
-
-        // DSLL32 $2, $1, 4 (shifts by 36)
-        let instr = make_r_type(0, 1, 2, 4, Cpu::SPECIAL_FUNCT_DSLL32);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0x2345678000000000_u64 as i64);
-    }
-
-    #[test]
-    fn test_dsrl32() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x1234567800000000_u64 as i64 as i128 as u128;
-
-        // DSRL32 $2, $1, 0 (shifts by 32)
-        let instr = make_r_type(0, 1, 2, 0, Cpu::SPECIAL_FUNCT_DSRL32);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as u64, 0x12345678);
-    }
-
-    #[test]
-    fn test_dsra32() {
-        let mut cpu = Cpu::new();
-        cpu.gprs[1] = 0x8000000000000000_u64 as i64 as i128 as u128;
-
-        // DSRA32 $2, $1, 0 (shifts by 32)
-        let instr = make_r_type(0, 1, 2, 0, Cpu::SPECIAL_FUNCT_DSRA32);
-        cpu.exec(instr);
-
-        assert_eq!(cpu.gprs[2] as i64, 0xFFFFFFFF80000000_u64 as i64);
-    }
-
-    #[test]
-    #[should_panic(expected = "SYSCALL instruction executed")]
-    fn test_syscall() {
-        let mut cpu = Cpu::new();
-        let instr = make_special(Cpu::SPECIAL_FUNCT_SYSCALL);
-        cpu.exec(instr);
-    }
-
-    #[test]
-    #[should_panic(expected = "BREAK instruction executed")]
-    fn test_break() {
-        let mut cpu = Cpu::new();
-        let instr = make_special(Cpu::SPECIAL_FUNCT_BREAK);
-        cpu.exec(instr);
+        let rt = Self::extract_rt(raw);
+        let rd = Self::extract_rd(raw);
+        let sa = Self::extract_sa(raw);
+
+        let result = (self.read_gpr_dword(rt) as i64) >> ((sa & 0b11111) + 32);
+        self.write_gpr_dword(rd, result as u64);
     }
 }
