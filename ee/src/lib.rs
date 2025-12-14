@@ -1,10 +1,11 @@
+#[derive(Default)]
 pub struct Cpu {
     gprs: [u128; 32],
     pc: u32,
     hi0: u64,
-    hi1: u64,
+    // hi1: u64,
     lo0: u64,
-    lo1: u64,
+    // lo1: u64,
     sa: u64,
     next_pc: u32,
 }
@@ -38,11 +39,11 @@ impl Cpu {
     }
 
     // Write GPR as 32-bit word (sign-extended to 128 bits)
-    #[inline]
-    fn write_gpr_word(&mut self, index: usize, value: u32) {
-        self.gprs[index] &= 0xffff_ff00;
-        self.gprs[index] |= value as u128;
-    }
+    // #[inline]
+    // fn write_gpr_word(&mut self, index: usize, value: u32) {
+    //     self.gprs[index] &= 0xffff_ff00;
+    //     self.gprs[index] |= value as u128;
+    // }
 
     // Read GPR as 64-bit doubleword (lower 64 bits)
     #[inline]
@@ -64,13 +65,60 @@ impl Cpu {
     }
 
     // Write GPR as 128-bit quadword (full width)
-    #[inline]
-    fn write_gpr_qword(&mut self, index: usize, value: u128) {
-        self.gprs[index] = value;
-    }
+    // #[inline]
+    // fn write_gpr_qword(&mut self, index: usize, value: u128) {
+    //     self.gprs[index] = value;
+    // }
 
     const OPCODE_SPECIAL: u32 = 0b000000;
     const OPCODE_REGIMM: u32 = 0b000001;
+    const OPCODE_J: u32 = 0b000010;
+    const OPCODE_JAL: u32 = 0b000011;
+    const OPCODE_BEQ: u32 = 0b000100;
+    const OPCODE_BNE: u32 = 0b000101;
+    const OPCODE_BLEZ: u32 = 0b000110;
+    const OPCODE_BGTZ: u32 = 0b000111;
+    const OPCODE_ADDI: u32 = 0b001000;
+    const OPCODE_ADDIU: u32 = 0b001001;
+    const OPCODE_SLTI: u32 = 0b001010;
+    const OPCODE_SLTIU: u32 = 0b001011;
+    const OPCODE_ANDI: u32 = 0b001100;
+    const OPCODE_ORI: u32 = 0b001101;
+    const OPCODE_XORI: u32 = 0b001110;
+    const OPCODE_LUI: u32 = 0b001111;
+    const OPCODE_BEQL: u32 = 0b010100;
+    const OPCODE_BNEL: u32 = 0b010101;
+    const OPCODE_BLEZL: u32 = 0b010110;
+    const OPCODE_BGTZL: u32 = 0b010111;
+    const OPCODE_DADDI: u32 = 0b011000;
+    const OPCODE_DADDIU: u32 = 0b011001;
+    const OPCODE_LDL: u32 = 0b011010;
+    const OPCODE_LDR: u32 = 0b011011;
+    const OPCODE_LQ: u32 = 0b011110;
+    const OPCODE_SQ: u32 = 0b011111;
+    const OPCODE_LB: u32 = 0b100000;
+    const OPCODE_LH: u32 = 0b100001;
+    const OPCODE_LWL: u32 = 0b100010;
+    const OPCODE_LW: u32 = 0b100011;
+    const OPCODE_LBU: u32 = 0b100100;
+    const OPCODE_LHU: u32 = 0b100101;
+    const OPCODE_LWR: u32 = 0b100110;
+    const OPCODE_LWU: u32 = 0b100111;
+    const OPCODE_SB: u32 = 0b101000;
+    const OPCODE_SH: u32 = 0b101001;
+    const OPCODE_SWL: u32 = 0b101010;
+    const OPCODE_SW: u32 = 0b101011;
+    const OPCODE_SDL: u32 = 0b101100;
+    const OPCODE_SDR: u32 = 0b101101;
+    const OPCODE_SWR: u32 = 0b101110;
+    const OPCODE_CACHE: u32 = 0b101111;
+    const OPCODE_LWC1: u32 = 0b110001;
+    const OPCODE_PREF: u32 = 0b110011;
+    const OPCODE_LQC2: u32 = 0b110110;
+    const OPCODE_LD: u32 = 0b110111;
+    const OPCODE_SWC1: u32 = 0b111001;
+    const OPCODE_SQC2: u32 = 0b111110;
+    const OPCODE_SD: u32 = 0b111111;
 
     const SPECIAL_FUNCT_SLL: u32 = 0b000000; // 0x00
     const SPECIAL_FUNCT_SRL: u32 = 0b000010; // 0x02
@@ -150,8 +198,8 @@ impl Cpu {
             next_pc: 4,
             lo0: 0,
             hi0: 0,
-            lo1: 0,
-            hi1: 0,
+            // lo1: 0,
+            // hi1: 0,
             sa: 0,
         }
     }
@@ -167,6 +215,53 @@ impl Cpu {
         match opcode {
             Self::OPCODE_SPECIAL => self.handle_special(raw),
             Self::OPCODE_REGIMM => self.handle_regimm(raw),
+            Self::OPCODE_J => self.do_j(raw),
+            Self::OPCODE_JAL => self.do_jal(raw),
+            Self::OPCODE_BEQ => self.do_beq(raw),
+            Self::OPCODE_BNE => self.do_bne(raw),
+            Self::OPCODE_BLEZ => self.do_blez(raw),
+            Self::OPCODE_BGTZ => self.do_bgtz(raw),
+            Self::OPCODE_ADDI => self.do_addi(raw),
+            Self::OPCODE_ADDIU => self.do_addiu(raw),
+            Self::OPCODE_SLTI => self.do_slti(raw),
+            Self::OPCODE_SLTIU => self.do_sltiu(raw),
+            Self::OPCODE_ANDI => self.do_andi(raw),
+            Self::OPCODE_ORI => self.do_ori(raw),
+            Self::OPCODE_XORI => self.do_xori(raw),
+            Self::OPCODE_LUI => self.do_lui(raw),
+            Self::OPCODE_BEQL => self.do_beql(raw),
+            Self::OPCODE_BNEL => self.do_bnel(raw),
+            Self::OPCODE_BLEZL => self.do_blezl(raw),
+            Self::OPCODE_BGTZL => self.do_bgtzl(raw),
+            Self::OPCODE_DADDI => self.do_daddi(raw),
+            Self::OPCODE_DADDIU => self.do_daddiu(raw),
+            Self::OPCODE_LDL => self.do_ldl(raw),
+            Self::OPCODE_LDR => self.do_ldr(raw),
+            Self::OPCODE_LQ => self.do_lq(raw),
+            Self::OPCODE_SQ => self.do_sq(raw),
+            Self::OPCODE_LB => self.do_lb(raw),
+            Self::OPCODE_LH => self.do_lh(raw),
+            Self::OPCODE_LWL => self.do_lwl(raw),
+            Self::OPCODE_LW => self.do_lw(raw),
+            Self::OPCODE_LBU => self.do_lbu(raw),
+            Self::OPCODE_LHU => self.do_lhu(raw),
+            Self::OPCODE_LWR => self.do_lwr(raw),
+            Self::OPCODE_LWU => self.do_lwu(raw),
+            Self::OPCODE_SB => self.do_sb(raw),
+            Self::OPCODE_SH => self.do_sh(raw),
+            Self::OPCODE_SWL => self.do_swl(raw),
+            Self::OPCODE_SW => self.do_sw(raw),
+            Self::OPCODE_SDL => self.do_sdl(raw),
+            Self::OPCODE_SDR => self.do_sdr(raw),
+            Self::OPCODE_SWR => self.do_swr(raw),
+            Self::OPCODE_CACHE => self.do_cache(raw),
+            Self::OPCODE_LWC1 => self.do_lwc1(raw),
+            Self::OPCODE_PREF => self.do_pref(raw),
+            Self::OPCODE_LQC2 => self.do_lqc2(raw),
+            Self::OPCODE_LD => self.do_ld(raw),
+            Self::OPCODE_SWC1 => self.do_swc1(raw),
+            Self::OPCODE_SQC2 => self.do_sqc2(raw),
+            Self::OPCODE_SD => self.do_sd(raw),
             _ => unimplemented!("Opcode {:06b} not implemented", opcode),
         }
     }
@@ -253,6 +348,466 @@ impl Cpu {
         }
     }
 
+    // Normal instructions (non-SPECIAL, non-REGIMM)
+
+    fn do_j(&mut self, raw: u32) {
+        // J target - Jump
+        let target = raw & 0x03FF_FFFF;
+        self.next_pc = ((self.pc + 4) & 0xF000_0000) | (target << 2);
+    }
+
+    fn do_jal(&mut self, raw: u32) {
+        // JAL target - Jump and Link
+        let target = raw & 0x03FF_FFFF;
+        self.write_gpr_dword(31, (self.pc + 8) as u64); // Return address
+        self.next_pc = ((self.pc + 4) & 0xF000_0000) | (target << 2);
+    }
+
+    fn do_beq(&mut self, raw: u32) {
+        // BEQ rs, rt, offset - Branch on Equal
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if self.read_gpr_dword(rs) == self.read_gpr_dword(rt) {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_bne(&mut self, raw: u32) {
+        // BNE rs, rt, offset - Branch on Not Equal
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if self.read_gpr_dword(rs) != self.read_gpr_dword(rt) {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_blez(&mut self, raw: u32) {
+        // BLEZ rs, offset - Branch on Less than or Equal to Zero
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) <= 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_bgtz(&mut self, raw: u32) {
+        // BGTZ rs, offset - Branch on Greater Than Zero
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) > 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_addi(&mut self, raw: u32) {
+        // ADDI rt, rs, immediate - Add Immediate with Overflow
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = raw as i16 as i32;
+
+        let rs_value = self.read_gpr_word(rs) as i32;
+        match rs_value.checked_add(imm) {
+            Some(result) => self.write_gpr_dword(rt, result as i64 as u64),
+            None => panic!("ADDI overflow exception"),
+        }
+    }
+
+    fn do_addiu(&mut self, raw: u32) {
+        // ADDIU rt, rs, immediate - Add Immediate Unsigned (no overflow)
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = raw as i16 as i32;
+
+        let rs_value = self.read_gpr_word(rs) as i32;
+        let result = rs_value.wrapping_add(imm);
+        self.write_gpr_dword(rt, result as i64 as u64);
+    }
+
+    fn do_slti(&mut self, raw: u32) {
+        // SLTI rt, rs, immediate - Set on Less Than Immediate (signed)
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = raw as i16 as i64;
+
+        let result = if (self.read_gpr_dword(rs) as i64) < imm {
+            1
+        } else {
+            0
+        };
+        self.write_gpr_dword(rt, result);
+    }
+
+    fn do_sltiu(&mut self, raw: u32) {
+        // SLTIU rt, rs, immediate - Set on Less Than Immediate Unsigned
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = raw as i16 as i64 as u64;
+
+        let result = if self.read_gpr_dword(rs) < imm { 1 } else { 0 };
+        self.write_gpr_dword(rt, result);
+    }
+
+    fn do_andi(&mut self, raw: u32) {
+        // ANDI rt, rs, immediate - AND Immediate
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = (raw & 0xFFFF) as u64;
+
+        self.write_gpr_dword(rt, self.read_gpr_dword(rs) & imm);
+    }
+
+    fn do_ori(&mut self, raw: u32) {
+        // ORI rt, rs, immediate - OR Immediate
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = (raw & 0xFFFF) as u64;
+
+        self.write_gpr_dword(rt, self.read_gpr_dword(rs) | imm);
+    }
+
+    fn do_xori(&mut self, raw: u32) {
+        // XORI rt, rs, immediate - XOR Immediate
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = (raw & 0xFFFF) as u64;
+
+        self.write_gpr_dword(rt, self.read_gpr_dword(rs) ^ imm);
+    }
+
+    fn do_lui(&mut self, raw: u32) {
+        // LUI rt, immediate - Load Upper Immediate
+        let rt = Self::extract_rt(raw);
+
+        let imm = (raw as i16 as i64) << 16;
+        self.write_gpr_dword(rt, imm as u64);
+    }
+
+    fn do_beql(&mut self, raw: u32) {
+        // BEQL rs, rt, offset - Branch on Equal Likely
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if self.read_gpr_dword(rs) == self.read_gpr_dword(rt) {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_bnel(&mut self, raw: u32) {
+        // BNEL rs, rt, offset - Branch on Not Equal Likely
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if self.read_gpr_dword(rs) != self.read_gpr_dword(rt) {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_blezl(&mut self, raw: u32) {
+        // BLEZL rs, offset - Branch on Less than or Equal to Zero Likely
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) <= 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_bgtzl(&mut self, raw: u32) {
+        // BGTZL rs, offset - Branch on Greater Than Zero Likely
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) > 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_daddi(&mut self, raw: u32) {
+        // DADDI rt, rs, immediate - Doubleword Add Immediate with Overflow
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = raw as i16 as i64;
+
+        let rs_value = self.read_gpr_dword(rs) as i64;
+        match rs_value.checked_add(imm) {
+            Some(result) => self.write_gpr_dword(rt, result as u64),
+            None => panic!("DADDI overflow exception"),
+        }
+    }
+
+    fn do_daddiu(&mut self, raw: u32) {
+        // DADDIU rt, rs, immediate - Doubleword Add Immediate Unsigned (no overflow)
+        let rs = Self::extract_rs(raw);
+        let rt = Self::extract_rt(raw);
+        let imm = raw as i16 as i64;
+        let rs_value = self.read_gpr_dword(rs) as i64;
+        let result = rs_value.wrapping_add(imm);
+
+        self.write_gpr_dword(rt, result as u64);
+    }
+
+    fn do_ldl(&mut self, raw: u32) {
+        // LDL rt, offset(base) - Load Doubleword Left
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LDL requires memory bus interface");
+    }
+
+    fn do_ldr(&mut self, raw: u32) {
+        // LDR rt, offset(base) - Load Doubleword Right
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LDR requires memory bus interface");
+    }
+
+    fn do_lq(&mut self, raw: u32) {
+        // LQ rt, offset(base) - Load Quadword
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LQ requires memory bus interface");
+    }
+
+    fn do_sq(&mut self, raw: u32) {
+        // SQ rt, offset(base) - Store Quadword
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SQ requires memory bus interface");
+    }
+
+    fn do_lb(&mut self, raw: u32) {
+        // LB rt, offset(base) - Load Byte (sign-extended)
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LB requires memory bus interface");
+    }
+
+    fn do_lh(&mut self, raw: u32) {
+        // LH rt, offset(base) - Load Halfword (sign-extended)
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LH requires memory bus interface");
+    }
+
+    fn do_lwl(&mut self, raw: u32) {
+        // LWL rt, offset(base) - Load Word Left
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LWL requires memory bus interface");
+    }
+
+    fn do_lw(&mut self, raw: u32) {
+        // LW rt, offset(base) - Load Word (sign-extended)
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LW requires memory bus interface");
+    }
+
+    fn do_lbu(&mut self, raw: u32) {
+        // LBU rt, offset(base) - Load Byte Unsigned
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LBU requires memory bus interface");
+    }
+
+    fn do_lhu(&mut self, raw: u32) {
+        // LHU rt, offset(base) - Load Halfword Unsigned
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LHU requires memory bus interface");
+    }
+
+    fn do_lwr(&mut self, raw: u32) {
+        // LWR rt, offset(base) - Load Word Right
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LWR requires memory bus interface");
+    }
+
+    fn do_lwu(&mut self, raw: u32) {
+        // LWU rt, offset(base) - Load Word Unsigned
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LWU requires memory bus interface");
+    }
+
+    fn do_sb(&mut self, raw: u32) {
+        // SB rt, offset(base) - Store Byte
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SB requires memory bus interface");
+    }
+
+    fn do_sh(&mut self, raw: u32) {
+        // SH rt, offset(base) - Store Halfword
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SH requires memory bus interface");
+    }
+
+    fn do_swl(&mut self, raw: u32) {
+        // SWL rt, offset(base) - Store Word Left
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SWL requires memory bus interface");
+    }
+
+    fn do_sw(&mut self, raw: u32) {
+        // SW rt, offset(base) - Store Word
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SW requires memory bus interface");
+    }
+
+    fn do_sdl(&mut self, raw: u32) {
+        // SDL rt, offset(base) - Store Doubleword Left
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SDL requires memory bus interface");
+    }
+
+    fn do_sdr(&mut self, raw: u32) {
+        // SDR rt, offset(base) - Store Doubleword Right
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SDR requires memory bus interface");
+    }
+
+    fn do_swr(&mut self, raw: u32) {
+        // SWR rt, offset(base) - Store Word Right
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SWR requires memory bus interface");
+    }
+
+    fn do_cache(&mut self, raw: u32) {
+        // CACHE op, offset(base) - Cache operation
+        let _base = Self::extract_rs(raw);
+        let _op = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        // Cache instructions are typically no-ops in emulation
+        // or require specific cache simulation
+        unimplemented!("CACHE instruction");
+    }
+
+    fn do_lwc1(&mut self, raw: u32) {
+        // LWC1 ft, offset(base) - Load Word to Coprocessor 1 (FPU)
+        let _base = Self::extract_rs(raw);
+        let _ft = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LWC1 requires FPU and memory bus interface");
+    }
+
+    fn do_pref(&mut self, _raw: u32) {
+        // PREF hint, offset(base) - Prefetch
+        // Prefetch is typically a no-op in emulation
+        // Just ignore it
+    }
+
+    fn do_lqc2(&mut self, raw: u32) {
+        // LQC2 vt, offset(base) - Load Quadword to Coprocessor 2 (VU)
+        let _base = Self::extract_rs(raw);
+        let _vt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LQC2 requires VU and memory bus interface");
+    }
+
+    fn do_ld(&mut self, raw: u32) {
+        // LD rt, offset(base) - Load Doubleword
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("LD requires memory bus interface");
+    }
+
+    fn do_swc1(&mut self, raw: u32) {
+        // SWC1 ft, offset(base) - Store Word from Coprocessor 1 (FPU)
+        let _base = Self::extract_rs(raw);
+        let _ft = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SWC1 requires FPU and memory bus interface");
+    }
+
+    fn do_sqc2(&mut self, raw: u32) {
+        // SQC2 vt, offset(base) - Store Quadword from Coprocessor 2 (VU)
+        let _base = Self::extract_rs(raw);
+        let _vt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SQC2 requires VU and memory bus interface");
+    }
+
+    fn do_sd(&mut self, raw: u32) {
+        // SD rt, offset(base) - Store Doubleword
+        let _base = Self::extract_rs(raw);
+        let _rt = Self::extract_rt(raw);
+        let _offset = raw as i16;
+
+        unimplemented!("SD requires memory bus interface");
+    }
+
     fn do_sll(&mut self, raw: u32) {
         // SLL rd, rt, sa - Shift Left Logical
         let rt = Self::extract_rt(raw);
@@ -301,7 +856,7 @@ impl Cpu {
         let rd = Self::extract_rd(raw);
 
         let sa = self.read_gpr_word(rs) & 0b11111;
-        let result = (self.read_gpr_word(rt) as u32) >> sa;
+        let result = self.read_gpr_word(rt) >> sa;
         self.write_gpr_dword(rd, result as i32 as i64 as u64);
     }
 
@@ -470,7 +1025,6 @@ impl Cpu {
 
         if rt_value == 0 {
             // in this case, lo0 and hi0 should be in an "undefined state". I think a NOP will do the job
-            return;
         } else {
             self.lo0 = rs_value.wrapping_div(rt_value) as u64;
             self.hi0 = rs_value.wrapping_rem(rt_value) as u64;
@@ -487,7 +1041,6 @@ impl Cpu {
 
         if rt_value == 0 {
             // in this case, lo0 and hi0 should be in an "undefined state". I think a NOP will do the job
-            return;
         } else {
             self.lo0 = rs_value / rt_value;
             self.hi0 = rs_value % rt_value;
@@ -515,8 +1068,11 @@ impl Cpu {
         let rt = Self::extract_rt(raw);
         let rd = Self::extract_rd(raw);
 
-        let result = self.read_gpr_word(rs).wrapping_add(self.read_gpr_word(rt));
-        self.write_gpr_dword(rd, result as u64);
+        let rs_value = self.read_gpr_word(rs) as i32;
+        let rt_value = self.read_gpr_word(rt) as i32;
+
+        let result = rs_value.wrapping_add(rt_value);
+        self.write_gpr_dword(rd, result as i64 as u64);
     }
 
     fn do_sub(&mut self, raw: u32) {
@@ -540,8 +1096,11 @@ impl Cpu {
         let rt = Self::extract_rt(raw);
         let rd = Self::extract_rd(raw);
 
-        let result = self.read_gpr_word(rs).wrapping_sub(self.read_gpr_word(rt));
-        self.write_gpr_dword(rd, result as u64);
+        let rs_value = self.read_gpr_word(rs) as i32;
+        let rt_value = self.read_gpr_word(rt) as i32;
+
+        let result = rs_value.wrapping_sub(rt_value);
+        self.write_gpr_dword(rd, result as i64 as u64);
     }
 
     fn do_and(&mut self, raw: u32) {
@@ -583,7 +1142,7 @@ impl Cpu {
     fn do_mfsa(&mut self, raw: u32) {
         // MFSA rd - Move From Shift Amount
         let rd = Self::extract_rd(raw);
-        self.write_gpr_dword(rd, self.sa as u64);
+        self.write_gpr_dword(rd, self.sa);
     }
 
     fn do_mtsa(&mut self, raw: u32) {
@@ -641,10 +1200,11 @@ impl Cpu {
         let rt = Self::extract_rt(raw);
         let rd = Self::extract_rd(raw);
 
-        let result = self
-            .read_gpr_dword(rs)
-            .wrapping_add(self.read_gpr_dword(rt));
-        self.write_gpr_dword(rd, result);
+        let rs_value = self.read_gpr_dword(rs) as i64;
+        let rt_value = self.read_gpr_dword(rt) as i64;
+
+        let result = rs_value.wrapping_add(rt_value);
+        self.write_gpr_dword(rd, result as u64);
     }
 
     fn do_dsub(&mut self, raw: u32) {
@@ -668,10 +1228,12 @@ impl Cpu {
         let rt = Self::extract_rt(raw);
         let rd = Self::extract_rd(raw);
 
-        let result = self
-            .read_gpr_dword(rs)
-            .wrapping_sub(self.read_gpr_dword(rt));
-        self.write_gpr_dword(rd, result);
+        let rs_value = self.read_gpr_dword(rs) as i64;
+        let rt_value = self.read_gpr_dword(rt) as i64;
+
+        let result = rs_value.wrapping_sub(rt_value);
+
+        self.write_gpr_dword(rd, result as u64);
     }
 
     fn do_tge(&mut self, raw: u32) {
@@ -958,15 +1520,13 @@ impl Cpu {
         }
     }
 
-    // XXX: need to find documentation and verify these!:
-
     fn do_mtsab(&mut self, raw: u32) {
         // MTSAB rs, immediate - Move To Shift Amount Register Byte
         let rs = Self::extract_rs(raw);
         let imm = raw as i16 as i32;
 
         let rs_val = self.read_gpr_dword(rs) as i32;
-        self.sa = ((rs_val ^ imm) & 0xF) as u64;
+        self.sa = (((rs_val ^ imm) & 0b1111) as u64) * 8;
     }
 
     fn do_mtsah(&mut self, raw: u32) {
@@ -975,6 +1535,6 @@ impl Cpu {
         let imm = raw as i16 as i32;
 
         let rs_val = self.read_gpr_dword(rs) as i32;
-        self.sa = ((rs_val ^ imm) & 0x7) as u64;
+        self.sa = (((rs_val ^ imm) & 0b111) as u64) * 16;
     }
 }
