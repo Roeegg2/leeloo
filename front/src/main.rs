@@ -8,8 +8,4 @@ fn main() {
         cpu.update_pc();
         cpu.exec(bits);
     }
-
-    // let val: u64 = 0xffff_0000_0000_0000;
-    // println!("this is org val: {val}");
-    // println!("this is CAST val: {}", val as i64);
 }

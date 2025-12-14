@@ -70,6 +70,7 @@ impl Cpu {
     }
 
     const OPCODE_SPECIAL: u32 = 0b000000;
+    const OPCODE_REGIMM: u32 = 0b000001;
 
     const SPECIAL_FUNCT_SLL: u32 = 0b000000; // 0x00
     const SPECIAL_FUNCT_SRL: u32 = 0b000010; // 0x02
@@ -124,6 +125,24 @@ impl Cpu {
     const SPECIAL_FUNCT_DSRL32: u32 = 0b111110; // 0x3E
     const SPECIAL_FUNCT_DSRA32: u32 = 0b111111; // 0x3F
 
+    // REGIMM rt field values
+    const REGIMM_BLTZ: u32 = 0b00000; // 0x00
+    const REGIMM_BGEZ: u32 = 0b00001; // 0x01
+    const REGIMM_BLTZL: u32 = 0b00010; // 0x02
+    const REGIMM_BGEZL: u32 = 0b00011; // 0x03
+    const REGIMM_TGEI: u32 = 0b01000; // 0x08
+    const REGIMM_TGEIU: u32 = 0b01001; // 0x09
+    const REGIMM_TLTI: u32 = 0b01010; // 0x0A
+    const REGIMM_TLTIU: u32 = 0b01011; // 0x0B
+    const REGIMM_TEQI: u32 = 0b01100; // 0x0C
+    const REGIMM_TNEI: u32 = 0b01110; // 0x0E
+    const REGIMM_BLTZAL: u32 = 0b10000; // 0x10
+    const REGIMM_BGEZAL: u32 = 0b10001; // 0x11
+    const REGIMM_BLTZALL: u32 = 0b10010; // 0x12
+    const REGIMM_BGEZALL: u32 = 0b10011; // 0x13
+    const REGIMM_MTSAB: u32 = 0b11000; // 0x18
+    const REGIMM_MTSAH: u32 = 0b11001; // 0x19
+
     pub fn new() -> Self {
         Cpu {
             gprs: [0; 32],
@@ -147,6 +166,7 @@ impl Cpu {
         let opcode = (raw >> 26) & 0b111111;
         match opcode {
             Self::OPCODE_SPECIAL => self.handle_special(raw),
+            Self::OPCODE_REGIMM => self.handle_regimm(raw),
             _ => unimplemented!("Opcode {:06b} not implemented", opcode),
         }
     }
@@ -207,6 +227,29 @@ impl Cpu {
             Self::SPECIAL_FUNCT_DSRL32 => self.do_dsrl32(raw),
             Self::SPECIAL_FUNCT_DSRA32 => self.do_dsra32(raw),
             _ => unimplemented!("Function {:06b} not implemented", funct),
+        }
+    }
+
+    fn handle_regimm(&mut self, raw: u32) {
+        let rt = (raw >> 16) & 0b11111;
+        match rt {
+            Self::REGIMM_BLTZ => self.do_bltz(raw),
+            Self::REGIMM_BGEZ => self.do_bgez(raw),
+            Self::REGIMM_BLTZL => self.do_bltzl(raw),
+            Self::REGIMM_BGEZL => self.do_bgezl(raw),
+            Self::REGIMM_TGEI => self.do_tgei(raw),
+            Self::REGIMM_TGEIU => self.do_tgeiu(raw),
+            Self::REGIMM_TLTI => self.do_tlti(raw),
+            Self::REGIMM_TLTIU => self.do_tltiu(raw),
+            Self::REGIMM_TEQI => self.do_teqi(raw),
+            Self::REGIMM_TNEI => self.do_tnei(raw),
+            Self::REGIMM_BLTZAL => self.do_bltzal(raw),
+            Self::REGIMM_BGEZAL => self.do_bgezal(raw),
+            Self::REGIMM_BLTZALL => self.do_bltzall(raw),
+            Self::REGIMM_BGEZALL => self.do_bgezall(raw),
+            Self::REGIMM_MTSAB => self.do_mtsab(raw),
+            Self::REGIMM_MTSAH => self.do_mtsah(raw),
+            _ => unimplemented!("REGIMM rt {:05b} not implemented", rt),
         }
     }
 
@@ -749,5 +792,189 @@ impl Cpu {
 
         let result = (self.read_gpr_dword(rt) as i64) >> ((sa & 0b11111) + 32);
         self.write_gpr_dword(rd, result as u64);
+    }
+
+    // REGIMM stuff
+
+    fn do_bltz(&mut self, raw: u32) {
+        // BLTZ rs, offset - Branch on Less Than Zero
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) < 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_bgez(&mut self, raw: u32) {
+        // BGEZ rs, offset - Branch on Greater than or Equal to Zero
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) >= 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_bltzl(&mut self, raw: u32) {
+        // BLTZL rs, offset - Branch on Less Than Zero Likely
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) < 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_bgezl(&mut self, raw: u32) {
+        // BGEZL rs, offset - Branch on Greater than or Equal to Zero Likely
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) >= 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_tgei(&mut self, raw: u32) {
+        // TGEI rs, immediate - Trap if Greater Than or Equal Immediate
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i64;
+
+        if (self.read_gpr_dword(rs) as i64) >= imm {
+            panic!("Trap exception: TGEI");
+        }
+    }
+
+    fn do_tgeiu(&mut self, raw: u32) {
+        // TGEIU rs, immediate - Trap if Greater Than or Equal Immediate Unsigned
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as u64;
+
+        if self.read_gpr_dword(rs) >= imm {
+            panic!("Trap exception: TGEIU");
+        }
+    }
+
+    fn do_tlti(&mut self, raw: u32) {
+        // TLTI rs, immediate - Trap if Less Than Immediate
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i64;
+
+        if (self.read_gpr_dword(rs) as i64) < imm {
+            panic!("Trap exception: TLTI");
+        }
+    }
+
+    fn do_tltiu(&mut self, raw: u32) {
+        // TLTIU rs, immediate - Trap if Less Than Immediate Unsigned
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i64 as u64;
+
+        if self.read_gpr_dword(rs) < imm {
+            panic!("Trap exception: TLTIU");
+        }
+    }
+
+    fn do_teqi(&mut self, raw: u32) {
+        // TEQI rs, immediate - Trap if Equal Immediate
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i64;
+
+        if (self.read_gpr_dword(rs) as i64) == imm {
+            panic!("Trap exception: TEQI");
+        }
+    }
+
+    fn do_tnei(&mut self, raw: u32) {
+        // TNEI rs, immediate - Trap if Not Equal Immediate
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i64;
+
+        if (self.read_gpr_dword(rs) as i64) != imm {
+            panic!("Trap exception: TNEI");
+        }
+    }
+
+    fn do_bltzal(&mut self, raw: u32) {
+        // BLTZAL rs, offset - Branch on Less Than Zero And Link
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        // Always store return address in $31
+        self.write_gpr_dword(31, self.pc as u64 + 8);
+
+        if (self.read_gpr_dword(rs) as i64) < 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_bgezal(&mut self, raw: u32) {
+        // BGEZAL rs, offset - Branch on Greater than or Equal to Zero And Link
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        // Always store return address in $31
+        self.write_gpr_dword(31, self.pc as u64 + 8);
+
+        if (self.read_gpr_dword(rs) as i64) >= 0 {
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        }
+    }
+
+    fn do_bltzall(&mut self, raw: u32) {
+        // BLTZALL rs, offset - Branch on Less Than Zero And Link Likely
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) < 0 {
+            // Store return address in $31
+            self.write_gpr_dword(31, self.pc as u64 + 8);
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    fn do_bgezall(&mut self, raw: u32) {
+        // BGEZALL rs, offset - Branch on Greater than or Equal to Zero And Link Likely
+        let rs = Self::extract_rs(raw);
+        let offset = (raw as i16 as i32) << 2;
+
+        if (self.read_gpr_dword(rs) as i64) >= 0 {
+            // Store return address in $31
+            self.write_gpr_dword(31, self.pc as u64 + 8);
+            self.next_pc = (self.pc as i32 + 4 + offset) as u32;
+        } else {
+            // Skip delay slot (nullify)
+            self.next_pc += 4;
+        }
+    }
+
+    // XXX: need to find documentation and verify these!:
+
+    fn do_mtsab(&mut self, raw: u32) {
+        // MTSAB rs, immediate - Move To Shift Amount Register Byte
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i32;
+
+        let rs_val = self.read_gpr_dword(rs) as i32;
+        self.sa = ((rs_val ^ imm) & 0xF) as u64;
+    }
+
+    fn do_mtsah(&mut self, raw: u32) {
+        // MTSAH rs, immediate - Move To Shift Amount Register Halfword
+        let rs = Self::extract_rs(raw);
+        let imm = raw as i16 as i32;
+
+        let rs_val = self.read_gpr_dword(rs) as i32;
+        self.sa = ((rs_val ^ imm) & 0x7) as u64;
     }
 }
