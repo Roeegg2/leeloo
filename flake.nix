@@ -27,7 +27,7 @@
       devShells.${system}.default = pkgs.mkShell {
         packages = [
           rust
-          pkgs.gnumake
+          pkgs.just
           pkgs.git
           pkgs.curl
           pkgs.xorriso
