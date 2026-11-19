@@ -5,7 +5,7 @@ profile_subdir := if rust_profile == "dev" { "debug" } else { rust_profile }
 
 default:
     RUSTFLAGS="-C relocation-model=static" cargo build --target x86_64-unknown-none --profile {{rust_profile}}
-    cp "target/x86_64-unknown-none/{{profile_subdir}}/limine-rust-template" kernel
+    cp "target/x86_64-unknown-none/{{profile_subdir}}/leeloo" kernel
 
 clean:
     cargo clean
