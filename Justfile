@@ -1,3 +1,4 @@
+set quiet
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 image_name := "template-x86_64"
@@ -36,6 +37,7 @@ run: edk2-ovmf iso
         -M q35 \
         -drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-x86_64.fd,readonly=on \
         -cdrom {{image_name}}.iso \
+        -serial stdio \
         {{qemu_flags}}
 
 run-hdd: edk2-ovmf hdd
@@ -43,7 +45,22 @@ run-hdd: edk2-ovmf hdd
         -M q35 \
         -drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-x86_64.fd,readonly=on \
         -hda {{image_name}}.hdd \
+        -serial stdio \
         {{qemu_flags}}
+
+build: kernel
+
+debug:
+    just --justfile kernel/Justfile debug
+
+check:
+    just --justfile kernel/Justfile check
+
+clippy:
+    just --justfile kernel/Justfile clippy
+
+fmt:
+    just --justfile kernel/Justfile fmt
 
 kernel:
     just --justfile kernel/Justfile
