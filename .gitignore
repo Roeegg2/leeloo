@@ -1,6 +1,7 @@
-/kernel/kernel
-/kernel/target
+/tags
+kernel
 /limine
+/target
 /edk2-ovmf
 *.iso
 *.hdd
