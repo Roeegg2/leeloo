@@ -42,7 +42,7 @@ const Tss = extern struct {
     iomap_base: u16 = 0,
 };
 
-var tss: Tss = .{
+var tss: Tss align(64) = .{
     // set the base past the configured size to disable the IObitmap for now.
     .iomap_base = @sizeOf(Tss),
 };
@@ -106,7 +106,6 @@ var gdt: Gdt = .{ .null_descr = .{}, .kernel_code = .{
     .flags = FLAGS_GRANULARITY_4K | FLAGS_LONG_MODE,
 }, .tss = .{} };
 
-
 /// NOTE this function does `cli`
 pub fn load() void {
     // the stack grows downward, so point to the end of the array.
@@ -156,7 +155,20 @@ pub fn load() void {
     asm volatile ("ltr %[sel]"
         :
         : [sel] "r" (tss_sel),
-    );
+        : .{ .memory = true });
 
     serial.kprint("TSS loaded!\n");
+}
+
+// a bunch of comptime sanity asserts
+comptime {
+    const assert = @import("std").debug.assert;
+
+    assert(@sizeOf(Tss) == 104);
+    assert(@sizeOf(SystemSegmentDescriptor) == 16);
+    assert(@sizeOf(DescriptorTablePointer) == 10);
+    assert(@offsetOf(Gdt, "tss") == 0x28);
+    assert(@offsetOf(Tss, "rsp0") == 4);
+    assert(@offsetOf(Tss, "ist1") == 36);
+    assert(@offsetOf(Tss, "iomap_base") == 102);
 }

@@ -29,7 +29,7 @@ pub fn init() !void {
     // set divisor to 38400 baud (we don't need higher speeds right now tbh)
     outb(COM1 + DIVISOR_LO_REG, 0x03);
     outb(COM1 + DIVISOR_HI_REG, 0x00);
-    // clear DLAB, set character length to 8 bits, 1 stop bit, and no parity because it's for paranoids 
+    // clear DLAB, set character length to 8 bits, 1 stop bit, and no parity because it's for paranoids
     outb(COM1 + LINE_CTRL_REG, 0x03);
     outb(COM1 + INTERRUPT_IDENT_REG, 0xc7);
     outb(COM1 + MODEM_CTRL_REG, 0x0b);

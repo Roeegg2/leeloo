@@ -36,8 +36,6 @@ export fn kmain() noreturn {
         @panic("Framebuffer response not present");
     }
 
-    serial.init() catch unreachable;
-
     arch.init();
 
     serial.kprint("HALLO\n");
