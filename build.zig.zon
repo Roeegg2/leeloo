@@ -1,0 +1,12 @@
+.{
+    .name = .leeloo,
+    .version = "0.0.1",
+    .dependencies = .{
+        .limine_zig = .{
+            .path = "vendor/limine_zig",
+        },
+    },
+    .minimum_zig_version = "0.17.1",
+    .paths = .{""},
+    .fingerprint = 0xed7ba86bc716d9be,
+}

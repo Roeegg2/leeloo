@@ -25,14 +25,24 @@ pub fn build(b: *Build) void {
     const target = kernelTarget(b);
     const optimize = b.standardOptimizeOption(.{});
 
+    const limine_zig = b.dependency("limine_zig", .{
+        // The API revision of the Limine Boot Protocol to use. Defaults to 0.
+        .api_revision = 3,
+        // If false, the build fails if deprecated features are used.
+        .allow_deprecated = false,
+        // If true, pointer fields are exposed as raw addresses.
+        .no_pointers = false,
+    });
+    const limine_module = limine_zig.module("limine");
+
     // Kernel (honours -Doptimize) -> installed into zig-out/
-    const kernel = addKernel(b, "kernel", target, optimize);
+    const kernel = addKernel(b, "kernel", target, optimize, limine_module);
     b.installArtifact(kernel);
 
     const run = addQemu(b, addIso(b, kernel, "leeloo.iso"), &.{});
     b.step("run", "Run the kernel in QEMU").dependOn(&run.step);
 
-    const debug_kernel = addKernel(b, "kernel-debug", target, .Debug);
+    const debug_kernel = addKernel(b, "kernel-debug", target, .Debug, limine_module);
     const debug = addQemu(b, addIso(b, debug_kernel, "leeloo-debug.iso"), &.{ "-s", "-S" });
     b.step("debug", "Run the debug kernel in QEMU, paused for GDB").dependOn(&debug.step);
 
@@ -58,6 +68,7 @@ fn addKernel(
     name: []const u8,
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    limine: *Build.Module,
 ) *Build.Step.Compile {
     const exe = b.addExecutable(.{
         .name = name,
@@ -68,6 +79,9 @@ fn addKernel(
             .code_model = .kernel,
             // to prevent interrupts from clobbering the redzone
             .red_zone = false,
+            .imports = &.{
+                .{ .name = "limine", .module = limine },
+            },
         }),
         .use_llvm = true,
     });

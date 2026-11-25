@@ -1,20 +1,46 @@
-const limine = @import("limine.zig");
+const builtin = @import("builtin");
+const limine = @import("limine");
+const serial = @import("x86_64/serial.zig");
+const arch = @import("x86_64/arch.zig");
 
-export var base_revision: limine.BaseRevision linksection(".limine_requests") = .{ .revision = 3 };
+export var start_marker: limine.RequestsStartMarker linksection(".limine_requests_start") = .{};
+export var end_marker: limine.RequestsEndMarker linksection(".limine_requests_end") = .{};
 
-fn outb(port: u16, value: u8) void {
-    asm volatile ("outb %[v], %[p]"
-        :
-        : [v] "{al}" (value),
-          [p] "{dx}" (port),
-    );
+export var base_revision: limine.BaseRevision linksection(".limine_requests") = .init(3);
+export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
+
+fn hcf() noreturn {
+    while (true) {
+        switch (builtin.cpu.arch) {
+            .x86_64 => asm volatile ("hlt"),
+            .aarch64 => asm volatile ("wfi"),
+            .riscv64 => asm volatile ("wfi"),
+            .loongarch64 => asm volatile ("idle 0"),
+            else => unreachable,
+        }
+    }
 }
 
-fn serialPrint(s: []const u8) void {
-    for (s) |c| outb(0x3F8, c);
-}
+export fn kmain() noreturn {
+    if (!base_revision.isSupported()) {
+        @panic("Base revision not supported");
+    }
 
-export fn kmain() callconv(.c) noreturn {
-    serialPrint("hello from leeloo kmainnnnnnnnnnnn\n");
-    while (true) asm volatile ("hlt");
+    if (framebuffer_request.response) |framebuffer_response| {
+        const framebuffer = framebuffer_response.getFramebuffers()[0];
+        for (0..100) |i| {
+            const fb_ptr: [*]volatile u32 = @ptrCast(@alignCast(framebuffer.address));
+            fb_ptr[i * (framebuffer.pitch / 4) + i] = 0xffffff;
+        }
+    } else {
+        @panic("Framebuffer response not present");
+    }
+
+    serial.init() catch unreachable;
+
+    arch.init();
+
+    serial.kprint("HALLO\n");
+
+    hcf();
 }
