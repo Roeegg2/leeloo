@@ -1,25 +1,12 @@
-const builtin = @import("builtin");
 const limine = @import("limine");
+const arch = @import("x86_64/root.zig");
 const serial = @import("x86_64/serial.zig");
-const arch = @import("x86_64/arch.zig");
 
 export var start_marker: limine.RequestsStartMarker linksection(".limine_requests_start") = .{};
 export var end_marker: limine.RequestsEndMarker linksection(".limine_requests_end") = .{};
 
 export var base_revision: limine.BaseRevision linksection(".limine_requests") = .init(3);
 export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
-
-fn hcf() noreturn {
-    while (true) {
-        switch (builtin.cpu.arch) {
-            .x86_64 => asm volatile ("hlt"),
-            .aarch64 => asm volatile ("wfi"),
-            .riscv64 => asm volatile ("wfi"),
-            .loongarch64 => asm volatile ("idle 0"),
-            else => unreachable,
-        }
-    }
-}
 
 export fn kmain() noreturn {
     if (!base_revision.isSupported()) {
@@ -40,5 +27,5 @@ export fn kmain() noreturn {
 
     serial.kprint("HALLO\n");
 
-    hcf();
+    arch.hcf();
 }

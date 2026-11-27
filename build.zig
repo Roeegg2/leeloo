@@ -43,8 +43,24 @@ pub fn build(b: *Build) void {
     b.step("run", "Run the kernel in QEMU").dependOn(&run.step);
 
     const debug_kernel = addKernel(b, "kernel-debug", target, .Debug, limine_module);
-    const debug = addQemu(b, addIso(b, debug_kernel, "leeloo-debug.iso"), &.{ "-s", "-S" });
+    const install_debug = b.addInstallArtifact(debug_kernel, .{});
+    const debug_iso = addIso(b, debug_kernel, "leeloo-debug.iso");
+
+    const debug = addQemu(b, debug_iso, &.{
+        "-s",
+        "-S",
+        "-d",
+        "int,cpu_reset,guest_errors",
+        "-D",
+        "qemu.log",
+    });
+    debug.step.dependOn(&install_debug.step);
     b.step("debug", "Run the debug kernel in QEMU, paused for GDB").dependOn(&debug.step);
+
+    // Build only, no QEMU. Terminates, so it's safe to call from nvim synchronously.
+    const build_debug = b.step("build-debug", "Build debug kernel + ISO without running QEMU");
+    build_debug.dependOn(&install_debug.step);
+    build_debug.dependOn(&b.addInstallFile(debug_iso, "leeloo-debug.iso").step);
 
     const clean = b.addSystemCommand(&.{ "rm", "-rf", "zig-out", ".zig-cache" });
     b.step("clean", "Remove generated build artifacts").dependOn(&clean.step);
