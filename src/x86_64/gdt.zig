@@ -1,4 +1,5 @@
 const serial = @import("serial.zig");
+const std = @import("std");
 
 /// is this segment entry valid or not
 const ACCESS_P: u8 = 1 << 7;
@@ -166,7 +167,7 @@ pub fn load() void {
     serial.kprint("TSS loaded!\n", .{});
 }
 
-// a bunch of comptime sanity asserts
+// COMPTIME TESTS
 comptime {
     const assert = @import("std").debug.assert;
 

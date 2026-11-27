@@ -1,9 +1,11 @@
 const root = @import("root.zig");
 const serial = @import("serial.zig");
 const gdt = @import("gdt.zig");
+const std = @import("std");
 
 // NOTE marked as extern and fields are in that specific order because the `commonIsrStub` pushes according to the SysV ABI
 pub const InterruptFrame = extern struct {
+    // pushed by our stub:
     r15: u64,
     r14: u64,
     r13: u64,
@@ -19,8 +21,11 @@ pub const InterruptFrame = extern struct {
     rcx: u64,
     rbx: u64,
     rax: u64,
+    // pushed by us:
     vector: u64,
+    // pushed by the CPU (or by us when the CPU doesn't):
     error_code: u64,
+    // pushed by the CPU:
     rip: u64,
     cs: u64,
     rflags: u64,
@@ -28,7 +33,7 @@ pub const InterruptFrame = extern struct {
     ss: u64,
 };
 
-pub const IsrHandler = *const fn (*InterruptFrame) void;
+pub const InterruptHandler = *const fn (*InterruptFrame) void;
 
 const GateDescriptor = packed struct(u128) {
     const GateType = enum(u4) {
@@ -81,26 +86,26 @@ const GateDescriptor = packed struct(u128) {
 
 const Idt = [256]GateDescriptor;
 
-const personalized_stubs = blk: {
+const unique_stubs = blk: {
     var table: [256]*const fn () callconv(.naked) void = undefined;
-    for (&table, 0..) |*slot, vec| slot.* = makePersonalizedIsrStub(@intCast(vec));
+    for (&table, 0..) |*slot, vec| slot.* = makeUniqueIsrStub(@intCast(vec));
     break :blk table;
 };
 
-var handlers: [256]?IsrHandler = @splat(null);
+var handlers: [256]?InterruptHandler = @splat(null);
 
 var idt: Idt align(16) = @splat(GateDescriptor.missing);
 
-pub fn registerInterruptHandler(vector: u8, handler: IsrHandler) void {
+pub fn registerInterruptHandler(vector: u8, handler: InterruptHandler) void {
     handlers[vector] = handler;
 }
 
 pub fn init() void {
-    for (&idt, personalized_stubs, 0..) |*gate, stub, vec| {
+    for (&idt, unique_stubs) |*gate, stub| {
         gate.* = .init(
             @intFromPtr(stub),
             @offsetOf(gdt.Gdt, "kernel_code"),
-            if (vec == 0x80) .trap else .interrupt,
+            .interrupt,
             0,
             0,
         );
@@ -119,37 +124,51 @@ pub fn init() void {
 
     serial.kprint("IDT loaded!\n", .{});
 
-    triggerTest();
+    registerInterruptHandler(0x80, testInterruptHandler);
+
+    // trigger test
+    asm volatile ("int $0x80");
 }
 
+// do some shit and then call the actual handler
 export fn commonIsrHandler(frame: *InterruptFrame) void {
+    // cast back to a u8 so we never index outside of `handlers` array, even in release builds
     const vector: u8 = @intCast(frame.vector);
+
     if (handlers[vector]) |handler| {
         handler(frame);
     } else if (vector < 32) {
-        serial.kprint("yayayaya\n", .{});
         @panic("unhandeled interrupt encountered");
     }
 }
 
-fn makePersonalizedIsrStub(comptime vector: u8) *const fn () callconv(.naked) void {
+fn makeUniqueIsrStub(comptime vector: u8) *const fn () callconv(.naked) void {
+    // whether the CPU already pushed an error code onto the stack or not
     const has_error_code = switch (vector) {
         8, 10, 11, 12, 13, 14, 17, 21, 29, 30 => true,
         else => false,
     };
 
     return struct {
-        fn personalizedStub() callconv(.naked) void {
-            asm volatile ((if (has_error_code) "" else "pushq $0\n") ++
+        fn uniqueStub() callconv(.naked) void {
+            asm volatile (
+                // push a dummy error code 42 if needed
+                (if (has_error_code) "" else "pushq $42\n") ++
+                // push the interrupt vector number
                     \\pushq %[vec]
+                // jump over to the stub
                     \\jmp commonIsrStub
                 :
-                : [vec] "i" (vector),
+                // make sure the value we push is a u64 and not a sign extended value
+                : [vec] "i" (@as(u64, vector)),
             );
         }
-    }.personalizedStub;
+    }.uniqueStub;
 }
 
+// stage 1 handling, which just pushes the rest of the stack frame fields and calls the common handler.
+// technically we could've already handled the interrupt here, but it's nicer to separate them into
+// 2 stages so we don't get ugly assembly mixed in with pure Zig code
 export fn commonIsrStub() callconv(.naked) void {
     asm volatile (
         \\pushq %rax
@@ -189,10 +208,12 @@ export fn commonIsrStub() callconv(.naked) void {
     );
 }
 
-fn triggerTest() void {
-    asm volatile ("int $0x80");
+fn testInterruptHandler(frame: *InterruptFrame) void {
+    _ = frame;
+    serial.kprint("TEST!\n", .{});
 }
 
+// COMPTIME TESTS
 comptime {
     const assert = @import("std").debug.assert;
 

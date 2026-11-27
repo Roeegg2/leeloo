@@ -45,12 +45,43 @@ pub fn init() !void {
     kprint("Serial initialized!\n", .{});
 }
 
-// TODO rewrite this and make it more idiomatic and safe
+const Writer = struct {
+    interface: std.Io.Writer,
+
+    pub fn init(buf: []u8) Writer {
+        return .{
+            .interface = .{
+                .vtable = &.{ .drain = drain },
+                .buffer = buf,
+            },
+        };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        if (w.end > 0) {
+            print(w.buffer[0..w.end]);
+            w.end = 0;
+        }
+        var total: usize = 0;
+        for (data[0 .. data.len - 1]) |slice| {
+            print(slice);
+            total += slice.len;
+        }
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            print(pattern);
+            total += pattern.len;
+        }
+        return total;
+    }
+};
+
 // CONCURRENCY lock before accessing to prevent buffer corruption
 pub fn kprint(comptime fmt: []const u8, args: anytype) void {
     var buf: [256]u8 = undefined;
-    const out = std.fmt.bufPrint(&buf, fmt, args) catch "><print truncated><\n";
-    print(out);
+    var cw = Writer.init(&buf);
+    cw.interface.print(fmt, args) catch unreachable;
+    cw.interface.flush() catch unreachable;
 }
 
 pub fn print(str: []const u8) void {
