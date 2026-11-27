@@ -9,11 +9,9 @@ pub fn init() void {
     idt.init();
 }
 
+// halt forever
 pub fn hcf() noreturn {
     while (true) {
-        switch (builtin.cpu.arch) {
-            .x86_64 => asm volatile ("hlt"),
-            else => unreachable,
-        }
+        asm volatile ("hlt");
     }
 }

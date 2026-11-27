@@ -117,7 +117,7 @@ pub fn init() void {
         : [idtr] "*m" (idtr),
         : .{ .memory = true });
 
-    serial.kprint("IDT loaded!\n");
+    serial.kprint("IDT loaded!\n", .{});
 
     triggerTest();
 }
@@ -127,9 +127,8 @@ export fn commonIsrHandler(frame: *InterruptFrame) void {
     if (handlers[vector]) |handler| {
         handler(frame);
     } else if (vector < 32) {
-        // make unhandled interrupts simply halt
-        serial.kprint("Unhandeled interrupt!");
-        root.hcf();
+        serial.kprint("yayayaya\n", .{});
+        @panic("unhandeled interrupt encountered");
     }
 }
 

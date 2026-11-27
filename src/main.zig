@@ -1,3 +1,4 @@
+const std = @import("std");
 const limine = @import("limine");
 const arch = @import("x86_64/root.zig");
 const serial = @import("x86_64/serial.zig");
@@ -25,7 +26,21 @@ export fn kmain() noreturn {
 
     arch.init();
 
-    serial.kprint("HALLO\n");
+    serial.kprint("HALLO\n", .{});
 
     arch.hcf();
 }
+
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    _ = error_return_trace;
+    _ = ret_addr;
+
+    // make sure we can panic without being disturbed
+    asm volatile ("cli");
+
+    serial.kprint("KERNEL PANIC: {s}\n", .{msg});
+
+    // "showdowns" are a better way than "meltdowns" for dealing with panic because that way we don't damage anything!
+    arch.hcf();
+}
+

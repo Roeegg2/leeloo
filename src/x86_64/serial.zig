@@ -42,10 +42,18 @@ pub fn init() !void {
 
     outb(COM1 + MODEM_CTRL_REG, 0x0f);
 
-    kprint("Serial initialized!\n");
+    kprint("Serial initialized!\n", .{});
 }
 
-pub fn kprint(str: []const u8) void {
+// TODO rewrite this and make it more idiomatic and safe
+// CONCURRENCY lock before accessing to prevent buffer corruption
+pub fn kprint(comptime fmt: []const u8, args: anytype) void {
+    var buf: [256]u8 = undefined;
+    const out = std.fmt.bufPrint(&buf, fmt, args) catch "><print truncated><\n";
+    print(out);
+}
+
+pub fn print(str: []const u8) void {
     for (str) |c| {
         while (!isTransmitEmpty()) {}
         outb(COM1 + DATA_REG, c);

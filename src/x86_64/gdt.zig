@@ -155,7 +155,7 @@ pub fn load() void {
           .cc = true,
         });
 
-    serial.kprint("GDT loaded!\n");
+    serial.kprint("GDT loaded!\n", .{});
 
     const tss_selector: u16 = @offsetOf(Gdt, "tss");
     asm volatile ("ltr %[selector]"
@@ -163,7 +163,7 @@ pub fn load() void {
         : [selector] "r" (tss_selector),
         : .{ .memory = true });
 
-    serial.kprint("TSS loaded!\n");
+    serial.kprint("TSS loaded!\n", .{});
 }
 
 // a bunch of comptime sanity asserts
